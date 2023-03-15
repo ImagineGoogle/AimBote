@@ -99,7 +99,7 @@ function GuiLibrary.CreateWindow(configuration: table): Frame
     Frame.Size = UDim2.new(0, 200, 0, 1)
     Frame.AutomaticSize = Enum.AutomaticSize.Y
     Frame.Name = configuration.Name
-    Frame.Parent = GuiLibrary.GuiObjects.MainGui
+    Frame.Parent = GuiLibrary.MainGui
 
     UIListLayout.Parent = Frame
 
