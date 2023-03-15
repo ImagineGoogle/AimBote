@@ -7,12 +7,14 @@ if shared.AimBoteInjected then
 end
 shared.AimBoteInjected = true
 
+local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
 local CoreGui = game:GetService("CoreGui")
 
 local GuiLibrary = {
     Settings = {
-        Theme = Color3.fromRGB(255, 160, 0)
+        Theme = Color3.fromRGB(255, 160, 0),
+        ToggleKey = Enum.KeyCode.RightShift
     },
     Modules = {},
     Windows = {}
@@ -78,6 +80,12 @@ function GuiLibrary.Init()
     UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
     UIListLayout.Padding = UDim.new(0, 25)
     UIListLayout.Parent = ClickGui
+
+    UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+        if not gameProcessedEvent and input.KeyCode == GuiLibrary.Settings.ToggleKey then
+            ClickGui.Visible = not ClickGui.Visible
+        end
+    end)
 end
 
 function GuiLibrary.CreateWindow(configuration: table): Frame
@@ -91,7 +99,6 @@ function GuiLibrary.CreateWindow(configuration: table): Frame
     Frame.Size = UDim2.new(0, 200, 0, 1)
     Frame.AutomaticSize = Enum.AutomaticSize.Y
     Frame.Name = configuration.Name
-    Frame.Visible = GuiLibrary.MainGui.ClickGui.Visible
     Frame.Parent = GuiLibrary.GuiObjects.MainGui
 
     UIListLayout.Parent = Frame
@@ -113,6 +120,7 @@ function GuiLibrary.CreateWindow(configuration: table): Frame
     UIPadding.Parent = WindowTitle
 
     table.insert(GuiLibrary.Windows, Frame)
+    return Frame
 end
 
 return GuiLibrary
