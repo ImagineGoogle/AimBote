@@ -9,6 +9,7 @@ shared.AimBoteInjected = true
 
 local UserInputService = game:GetService("UserInputService")
 local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
 local CoreGui = game:GetService("CoreGui")
 
 local GuiLibrary = {
@@ -16,6 +17,7 @@ local GuiLibrary = {
         Theme = Color3.fromRGB(255, 160, 0),
         ToggleKey = Enum.KeyCode.RightShift
     },
+    Connections = {},
     Modules = {},
     Windows = {}
 }
@@ -77,15 +79,35 @@ function GuiLibrary.Init()
 
     local UIListLayout = Instance.new("UIListLayout")
     UIListLayout.FillDirection = Enum.FillDirection.Horizontal
+    UIListLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
     UIListLayout.SortOrder = Enum.SortOrder.LayoutOrder
     UIListLayout.Padding = UDim.new(0, 25)
     UIListLayout.Parent = ClickGui
 
-    UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+    table.insert(GuiLibrary.Connections, UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
         if not gameProcessedEvent and input.KeyCode == GuiLibrary.Settings.ToggleKey then
             ClickGui.Visible = not ClickGui.Visible
+            RunService:SetRobloxGuiFocused(ClickGui.Visible)
         end
-    end)
+    end))
+end
+
+function GuiLibrary.Uninject()
+    for _, connection: RBXScriptConnection in ipairs(GuiLibrary.Connections) do
+        connection:Disconnect()
+    end
+    for _, module in ipairs(GuiLibrary.Modules) do
+        if module.Enabled then
+            module.Function(false)
+        end
+        for _, connection: RBXScriptConnection in ipairs(module.Connections) do
+            connection:Disconnect()
+        end
+    end
+    GuiLibrary.MainGui:Destroy()
+    RunService:SetRobloxGuiFocused(false)
+
+    shared.AimBoteInjected = false
 end
 
 function GuiLibrary.CreateWindow(configuration: table): Frame
@@ -99,7 +121,7 @@ function GuiLibrary.CreateWindow(configuration: table): Frame
     Frame.Size = UDim2.new(0, 200, 0, 1)
     Frame.AutomaticSize = Enum.AutomaticSize.Y
     Frame.Name = configuration.Name
-    Frame.Parent = GuiLibrary.MainGui
+    Frame.Parent = GuiLibrary.MainGui.ClickGui
 
     UIListLayout.Parent = Frame
 
@@ -119,8 +141,58 @@ function GuiLibrary.CreateWindow(configuration: table): Frame
     UIPadding.PaddingLeft = UDim.new(0, 10)
     UIPadding.Parent = WindowTitle
 
-    table.insert(GuiLibrary.Windows, Frame)
+    GuiLibrary.Windows[configuration.Name] = Frame
     return Frame
 end
 
+function GuiLibrary.CreateModule(configuration: table): Frame
+    local Module = Instance.new("Frame")
+    local Toggle = Instance.new("TextButton")
+    local UIPadding = Instance.new("UIPadding")
+    local Separator = Instance.new("Frame")
+
+    Module.Name = configuration.Name
+    Module.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    Module.BackgroundTransparency = 1.000
+    Module.Size = UDim2.new(1, 0, 0, 35)
+    Module.Parent = GuiLibrary.Windows[configuration.Window]
+
+    Toggle.Name = "Toggle"
+    Toggle.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    Toggle.BackgroundTransparency = 0.300
+    Toggle.BorderSizePixel = 0
+    Toggle.Size = UDim2.new(1, 0, 0, 35)
+    Toggle.AutoButtonColor = false
+    Toggle.Font = Enum.Font.SourceSans
+    Toggle.Text = configuration.Name
+    Toggle.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Toggle.TextSize = 20.000
+    Toggle.TextXAlignment = Enum.TextXAlignment.Left
+    Toggle.Parent = Module
+
+    UIPadding.PaddingLeft = UDim.new(0, 10)
+    UIPadding.Parent = Toggle
+
+    Separator.Name = "Separator"
+    Separator.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    Separator.BackgroundTransparency = 0.500
+    Separator.BorderSizePixel = 0
+    Separator.Size = UDim2.new(1, 0, 0, 1)
+    Separator.Parent = Module
+
+    GuiLibrary.Modules[configuration.Name] = {Enabled = false, Connections = {}, Function = configuration.Function}
+    local module = GuiLibrary.Modules[configuration.Name]
+
+    Toggle.MouseButton1Click:Connect(function()
+        if configuration.Toggleable == nil or configuration.Toggleable == true then
+            module.Enabled = not module.Enabled
+            configuration.Function(module.Enabled)
+            Toggle.BackgroundColor3 = module.Enabled and GuiLibrary.Settings.Theme or Color3.fromRGB(0, 0, 0)
+        else
+            configuration.Function(true)
+        end
+    end)
+end
+
+shared.AimBoteGuiLibrary = GuiLibrary
 return GuiLibrary
