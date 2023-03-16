@@ -6,6 +6,7 @@ if shared.AimBoteInjected then
     error("[AimBote]: Already injected.")
 end
 shared.AimBoteInjected = true
+shared.AimBoteShouldLoad = true
 
 local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
@@ -20,16 +21,33 @@ local GuiLibrary = {
         Theme = Color3.fromRGB(255, 160, 0),
         ToggleKey = Enum.KeyCode.RightShift
     },
-    TemporaryObjects = {},
     Connections = {},
+    LoadedModules = {},
     Modules = {},
     Windows = {}
 }
 local directoryName = "aimbote"
 local currentSaveName = string.format("%s.json", tostring(game.GameId))
+local shouldSave = false
+local uninjected = false
+
+local function copyTable(orig)
+    local orig_type = type(orig)
+    local copy
+    if orig_type == 'table' then
+        copy = {}
+        for orig_key, orig_value in next, orig, nil do
+            copy[copyTable(orig_key)] = copyTable(orig_value)
+        end
+        setmetatable(copy, copyTable(getmetatable(orig)))
+    else
+        copy = orig
+    end
+    return copy
+end
 
 local function saveModules()
-    local saveTable = GuiLibrary.Modules
+    local saveTable = copyTable(GuiLibrary.Modules)
     for _, module in pairs(saveTable) do
         module.Api = nil
         for _, option in pairs(module.Options) do
@@ -37,6 +55,9 @@ local function saveModules()
                 theOption.Api = nil
             end
         end
+    end
+    if saveTable.Uninject then
+        saveTable.Uninject = nil
     end
 
     if not isfolder(directoryName) then
@@ -50,9 +71,22 @@ end
 
 local function loadModules()
     if isfile(string.format("%s/Saves/%s", directoryName, currentSaveName)) then
-        GuiLibrary.Modules = HttpService:JSONDecode(readfile(string.format("%s/Saves/%s", directoryName, currentSaveName)))
+        GuiLibrary.LoadedModules = HttpService:JSONDecode(readfile(string.format("%s/Saves/%s", directoryName, currentSaveName)))
     end
 end
+
+task.spawn(function() -- Auto-Save
+    while true do
+        task.wait(5)
+        if uninjected then
+            break
+        end
+        if shouldSave then
+            shouldSave = false
+            saveModules()
+        end
+    end
+end)
 
 function GuiLibrary.Init()
     local function randomString()
@@ -106,7 +140,30 @@ function GuiLibrary.Init()
     end))
 end
 
+function GuiLibrary.LoadModules()
+    loadModules()
+
+    for name, loadedModuleTable in pairs(GuiLibrary.LoadedModules) do
+        local moduleTable = GuiLibrary.Modules[name]
+        if loadedModuleTable.Enabled then
+            moduleTable.Api.Toggle()
+        end
+        for toggleName, loadedToggleTable in pairs(loadedModuleTable.Options.Toggles) do
+            local toggleTable = moduleTable.Options.Toggles[toggleName]
+            if loadedToggleTable.Enabled then
+                toggleTable.Api.Toggle()
+            end
+        end
+        for sliderName, loadedSliderTable in pairs(loadedModuleTable.Options.Sliders) do
+            local sliderTable = moduleTable.Options.Sliders[sliderName]
+            sliderTable.Api.SetValue(loadedSliderTable.Value, true)
+        end
+    end
+end
+
 function GuiLibrary.Uninject()
+    uninjected = true
+
     for _, connection: RBXScriptConnection in ipairs(GuiLibrary.Connections) do
         connection:Disconnect()
     end
@@ -130,11 +187,10 @@ function GuiLibrary.Uninject()
         RunService:SetRobloxGuiFocused(false)
     end
     GuiLibrary.MainGui:Destroy()
-    for _, obj in ipairs(GuiLibrary.TemporaryObjects) do
-        obj:Destroy()
-    end
 
     shared.AimBoteInjected = false
+    shared.AimBoteShouldLoad = false
+    shared.AimBoteDeveloper = false
 end
 
 function GuiLibrary.CreateWindow(configuration: table): Frame
@@ -173,6 +229,19 @@ function GuiLibrary.CreateWindow(configuration: table): Frame
 end
 
 function GuiLibrary.CreateModule(configuration: table): table
+    GuiLibrary.Modules[configuration.Name] = {
+        Options = {
+            Toggles = {},
+            Sliders = {}
+        },
+        Api = {
+            Connections = {},
+            Function = configuration.Function
+        },
+        Enabled = false
+    }
+    local module = GuiLibrary.Modules[configuration.Name]
+
     local Module = Instance.new("Frame")
     local Toggle = Instance.new("TextButton")
     local UIPadding = Instance.new("UIPadding")
@@ -221,22 +290,11 @@ function GuiLibrary.CreateModule(configuration: table): table
     layout.Parent = OptionsMenu
     layout.SortOrder = Enum.SortOrder.Name
 
-    GuiLibrary.Modules[configuration.Name] = {
-        Api = {
-            Connections = {},
-            Function = configuration.Function
-        },
-        Options = {
-            Toggles = {},
-            Sliders = {}
-        },
-        Enabled = false,
-    }
-    local module = GuiLibrary.Modules[configuration.Name]
-
-    function module.Api.Toggle()
+    function module.Api.Toggle(changeEnabled)
         if configuration.Toggleable == nil or configuration.Toggleable == true then
-            module.Enabled = not module.Enabled
+            if changeEnabled == true or changeEnabled == nil then
+                module.Enabled = not module.Enabled
+            end
             configuration.Function(module.Enabled)
             Toggle.BackgroundColor3 = module.Enabled and GuiLibrary.Settings.Theme or Color3.fromRGB(0, 0, 0)
             if module.Enabled == false then
@@ -249,6 +307,7 @@ function GuiLibrary.CreateModule(configuration: table): table
         else
             configuration.Function(true)
         end
+        shouldSave = true
     end
 
     Toggle.MouseButton1Down:Connect(function()
@@ -259,6 +318,15 @@ function GuiLibrary.CreateModule(configuration: table): table
     end)
 
     function module.Api.CreateToggle(toggleConfiguration: table): table
+        module.Options.Toggles[toggleConfiguration.Name] = {
+            Api = {
+                Connections = {},
+                Function = toggleConfiguration.Function
+            },
+            Enabled = false
+        }
+        local toggle = module.Options.Toggles[toggleConfiguration.Name]
+
         local ToggleFrame = Instance.new("Frame")
         local TextLabel = Instance.new("TextLabel")
         local ToggleUIPadding = Instance.new("UIPadding")
@@ -310,17 +378,10 @@ function GuiLibrary.CreateModule(configuration: table): table
         UICorner.Parent = Indicator
         UICorner_2.Parent = Toggle_2
 
-        module.Options.Toggles[toggleConfiguration.Name] = {
-            Api = {
-                Connections = {},
-                Function = toggleConfiguration.Function
-            },
-            Enabled = false,
-        }
-        local toggle = module.Options.Toggles[toggleConfiguration.Name]
-
-        function toggle.Api.Toggle()
-            toggle.Enabled = not toggle.Enabled
+        function toggle.Api.Toggle(changeEnabled)
+            if changeEnabled == true or changeEnabled == nil then
+                toggle.Enabled = not toggle.Enabled
+            end
             toggleConfiguration.Function(toggle.Enabled)
             TweenService:Create(Indicator, TweenInfo.new(0.25), {Position = toggle.Enabled and UDim2.fromOffset(20, 0) or UDim2.fromOffset(0, 0)}):Play()
             TweenService:Create(Toggle_2, TweenInfo.new(0.25), {BackgroundColor3 = toggle.Enabled and GuiLibrary.Settings.Theme or Color3.fromRGB(0, 0, 0)}):Play()
@@ -332,14 +393,29 @@ function GuiLibrary.CreateModule(configuration: table): table
                 end
                 table.clear(toggle.Api.Connections)
             end
+            shouldSave = true
+        end
+
+        if toggle.Enabled then
+            toggle.Api.Toggle(false)
         end
 
         Toggle_2.MouseButton1Down:Connect(function()
             toggle.Api.Toggle()
         end)
+
+        return toggle
     end
 
     function module.Api.CreateSlider(sliderConfiguration: table): table
+        module.Options.Sliders[sliderConfiguration.Name] = {
+            Api = {
+                Function = sliderConfiguration.Function
+            },
+            Value = sliderConfiguration.DefaultValue,
+        }
+        local slider = module.Options.Sliders[sliderConfiguration.Name]
+
         local Slider = Instance.new("Frame")
         local TextLabel = Instance.new("TextLabel")
         local UIPadding_2 = Instance.new("UIPadding")
@@ -399,19 +475,6 @@ function GuiLibrary.CreateModule(configuration: table): table
         UICorner.Parent = Indicator
         UICorner_2.Parent = SliderLine
 
-        module.Options.Sliders[sliderConfiguration.Name] = {
-            Api = {
-                Function = sliderConfiguration.Function
-            },
-            Value = sliderConfiguration.DefaultValue,
-        }
-        local slider = module.Options.Sliders[sliderConfiguration.Name]
-
-        function slider.Api.SetValue(newValue)
-            slider.Value = newValue
-            slider.Api.Function(newValue)
-            TextLabel.Text = string.format("%s (%s)", sliderConfiguration.Name, slider.Value)
-        end
         local sliderAbsolutePos = SliderLine.AbsolutePosition
         local sliderAbsoluteSize = SliderLine.AbsoluteSize
         local minXPos = sliderAbsolutePos.X
@@ -421,24 +484,39 @@ function GuiLibrary.CreateModule(configuration: table): table
         local sliderConnection
         local endInputConnection
 
-        local function sliderMoved(value)
+        function slider.Api.SetValue(newValue, setPos)
+            slider.Value = newValue
+            slider.Api.Function(newValue)
+            TextLabel.Text = string.format("%s (%s)", sliderConfiguration.Name, slider.Value)
+            if setPos then
+                local newXPosition = (slider.Value / sliderConfiguration.MaxValue) * 100
+                print(newXPosition)
+                SliderProgress.Size = UDim2.new(0, newXPosition, 1, 0)
+            end
             Indicator.Position = UDim2.new(0, SliderProgress.AbsoluteSize.X - (Indicator.Size.X.Offset / 2), 0.5, 0)
+            shouldSave = true
+        end
+
+        local function sliderMoved(value)
             slider.Api.SetValue(math.round(value))
         end
 
         sliderMoved(SliderProgress.AbsoluteSize.X / sliderAbsoluteSize.X * range + sliderConfiguration.MinValue)
 
-        Indicator.MouseButton1Down:Connect(function()
-            local function mouseMoved()
-                if mouse.X < minXPos then
-                    SliderProgress.Size = UDim2.new(0, 0, 1, 0)
-                elseif mouse.X > maxXPos then
-                    SliderProgress.Size = UDim2.new(1, 0, 1, 0)
-                else
-                    SliderProgress.Size = UDim2.new(0, mouse.X - minXPos, 1, 0)
-                end
-                sliderMoved(SliderProgress.AbsoluteSize.X / sliderAbsoluteSize.X * range + sliderConfiguration.MinValue)
+        local function mouseMoved()
+            if mouse.X < minXPos then
+                SliderProgress.Size = UDim2.new(0, 0, 1, 0)
+            elseif mouse.X > maxXPos then
+                SliderProgress.Size = UDim2.new(1, 0, 1, 0)
+            else
+                SliderProgress.Size = UDim2.new(0, mouse.X - minXPos, 1, 0)
             end
+            sliderMoved(SliderProgress.AbsoluteSize.X / sliderAbsoluteSize.X * range + sliderConfiguration.MinValue)
+        end
+
+        slider.Api.SetValue(slider.Value)
+
+        Indicator.MouseButton1Down:Connect(function()
             mouseMoved()
             sliderConnection = mouse.Move:Connect(mouseMoved)
 
@@ -450,10 +528,10 @@ function GuiLibrary.CreateModule(configuration: table): table
             end)
         end)
 
-        return slider.Api
+        return slider
     end
 
-    return module.Api
+    return module
 end
 
 shared.AimBoteGuiLibrary = GuiLibrary
