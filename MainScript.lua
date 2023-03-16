@@ -1,10 +1,12 @@
-if not game:IsLoaded() then
-    game.Loaded:Wait()
+if shared.AimBoteShouldLoad == false then
+    shared.AimBoteShouldLoad = true
+    return
 end
 
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 
-local GuiLibrary = isfile("GuiLibrary.txt") and loadstring(readfile("GuiLibrary.txt"))() or loadstring(game:HttpGet("https://raw.githubusercontent.com/ImagineGoogle/AimBote/main/GuiLibrary.lua"))()
+local GuiLibrary = isfile("GuiLibrary.txt") and shared.AimBoteDeveloper and loadstring(readfile("GuiLibrary.txt"))() or loadstring(game:HttpGet("https://raw.githubusercontent.com/ImagineGoogle/AimBote/main/GuiLibrary.lua"))()
 
 GuiLibrary.Init()
 
@@ -12,8 +14,23 @@ local function runFunction(func)
     func()
 end
 
+local queueonteleport = syn and syn.queue_on_teleport or queue_on_teleport or function(str) end
 local localPlayer = Players.LocalPlayer
 local bedwars
+
+runFunction(function() -- Queue On Teleport
+    local teleportScript = [[
+        if shared.AimBoteDeveloper then 
+            loadstring(readfile("MainScript.txt"))() 
+        else 
+            loadstring(game:HttpGet("https://raw.githubusercontent.com/ImagineGoogle/AimBote/MainScript.lua"))() 
+        end
+    ]]
+    if shared.AimBoteDeveloper then
+        teleportScript = "shared.AimBoteDeveloper = true\n" .. teleportScript
+    end
+    queueonteleport(teleportScript)
+end)
 
 runFunction(function() -- Knit and modules
     local KnitGotten, KnitClient
@@ -28,6 +45,7 @@ runFunction(function() -- Knit and modules
 
     bedwars = {
         SprintController = KnitClient.Controllers.SprintController,
+        KnockbackUtil = require(ReplicatedStorage.TS.damage["knockback-util"]).KnockbackUtil,
     }
 end)
 
@@ -39,16 +57,18 @@ runFunction(function() -- Windows
     GuiLibrary.CreateWindow {Name = "Miscellaneous"}
 end)
 
-GuiLibrary.CreateModule {
-    Window = "Miscellaneous",
-    Name = "Uninject",
-    Toggleable = false,
-    Function = function(callback)
-        if callback then
-            GuiLibrary.Uninject()
+runFunction(function() -- Uninject
+    GuiLibrary.CreateModule {
+        Window = "Miscellaneous",
+        Name = "Uninject",
+        Toggleable = false,
+        Function = function(callback)
+            if callback then
+                GuiLibrary.Uninject()
+            end
         end
-    end
-}
+    }
+end)
 
 runFunction(function() -- Sprint
     local oldSprintFunction
@@ -66,7 +86,7 @@ runFunction(function() -- Sprint
                     bedwars.SprintController:startSprinting()
                     return originalCall
                 end
-                table.insert(Sprint.Connections, localPlayer.CharacterAdded:Connect(function(character)
+                table.insert(Sprint.Api.Connections, localPlayer.CharacterAdded:Connect(function(character)
                     character:WaitForChild("Humanoid", 9e9)
                     task.wait(0.5)
                     bedwars.SprintController:stopSprinting()
@@ -83,24 +103,37 @@ runFunction(function() -- Sprint
 end)
 
 runFunction(function() -- Velocity
+	local VelocityX = {Value = 100}
+	local VelocityY = {Value = 100}
+	local applyKnockback
+
     local Velocity = GuiLibrary.CreateModule {
         Window = "Combat",
         Name = "Velocity",
         Toggleable = true,
         Function = function(callback)
-            if callback then
-    
-            end
-        end
+			if callback then
+				applyKnockback = bedwars.KnockbackUtil.applyKnockback
+				bedwars.KnockbackUtil.applyKnockback = function(root, mass, dir, knockback, ...)
+					knockback = knockback or {}
+					if VelocityX.Value == 0 and VelocityY.Value == 0 then return end
+					knockback.horizontal = (knockback.horizontal or 1) * (VelocityX.Value / 100)
+					knockback.vertical = (knockback.vertical or 1) * (VelocityY.Value / 100)
+					return applyKnockback(root, mass, dir, knockback, ...)
+				end
+			else
+				bedwars.KnockbackUtil.applyKnockback = applyKnockback
+			end
+		end,
     }
-    Velocity.CreateSlider {
+    VelocityX = Velocity.Api.CreateSlider {
         Name = "X",
         DefaultValue = 0,
         MaxValue = 100,
         MinValue = 0,
         Function = function() end
     }
-    Velocity.CreateSlider {
+    VelocityY = Velocity.Api.CreateSlider {
         Name = "Y",
         DefaultValue = 0,
         MaxValue = 100,
@@ -108,3 +141,5 @@ runFunction(function() -- Velocity
         Function = function() end
     }
 end)
+
+GuiLibrary.LoadModules()
